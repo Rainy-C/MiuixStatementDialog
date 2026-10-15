@@ -1,12 +1,16 @@
 package me.rain.miuixdialog
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -40,6 +44,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -68,19 +73,12 @@ import top.yukonga.miuix.kmp.theme.lightColorScheme
 
 private const val PREFS = "statement_dialog_demo"
 private const val PREF_HIDE = "hide_statement"
-private val Blue = Color(0xFF476BDA)
-private val BlueBright = Color(0xFF6386FA)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent {
-            val dark = isSystemInDarkTheme()
-            MiuixTheme(colors = if (dark) darkColorScheme() else lightColorScheme()) {
-                DialogDemo(dark = dark)
-            }
-        }
+        setContent { DialogDemo() }
     }
 }
 
@@ -94,190 +92,232 @@ private data class Palette(
 )
 
 private fun palette(dark: Boolean) = if (dark) {
-    Palette(
-        background = Color(0xFF0E1013),
-        surface = Color(0xFF202226),
-        mutedSurface = Color(0xFF2A2D32),
-        mainText = Color(0xFFF7F8FA),
-        subText = Color(0xFFADB0B8),
-        line = Color(0xFF393C42)
-    )
+    Palette(Color(0xFF0E1013), Color(0xFF202226), Color(0xFF2A2D32),
+        Color(0xFFF7F8FA), Color(0xFFADB0B8), Color(0xFF393C42))
 } else {
-    Palette(
-        background = Color(0xFFF5F6F8),
-        surface = Color.White,
-        mutedSurface = Color(0xFFF4F5F7),
-        mainText = Color(0xFF191B20),
-        subText = Color(0xFF777D87),
-        line = Color(0xFFE9EBEF)
-    )
+    Palette(Color(0xFFF5F6F8), Color.White, Color(0xFFF4F5F7),
+        Color(0xFF191B20), Color(0xFF777D87), Color(0xFFE9EBEF))
 }
 
 @Composable
-private fun DialogDemo(dark: Boolean) {
+private fun DialogDemo() {
     val context = LocalContext.current
     val prefs = remember(context) { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+    var config by remember { mutableStateOf(RemoteDialogRepository.cached(context) ?: RemoteDialogRepository.bundled(context)) }
+    var syncStatus by remember { mutableStateOf("正在获取远程配置…") }
+    var refreshing by remember { mutableIntStateOf(0) }
+    var initialized by remember { mutableStateOf(false) }
     var neverShow by remember { mutableStateOf(prefs.getBoolean(PREF_HIDE, false)) }
-    var showDialog by rememberSaveable { mutableStateOf(!prefs.getBoolean(PREF_HIDE, false)) }
+    var showDialog by rememberSaveable { mutableStateOf(false) }
     var lastAction by rememberSaveable { mutableStateOf("尚未选择") }
+
+    val systemDark = isSystemInDarkTheme()
+    val dark = when (config.appearance.theme) {
+        "dark" -> true
+        "light" -> false
+        else -> systemDark
+    }
     val c = palette(dark)
+    val accent = config.appearance.accent()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(c.background)
-            .safeDrawingPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
-    ) {
-        Spacer(Modifier.height(18.dp))
-        Text(
-            text = "MIUIX  /  COMPONENT LAB",
-            color = Blue,
-            fontSize = 11.sp,
-            letterSpacing = 1.6.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "声明弹窗",
-            color = c.mainText,
-            fontWeight = FontWeight.Bold,
-            fontSize = 36.sp,
-            letterSpacing = (-1).sp
-        )
-        Text(
-            text = "一个轻盈、克制的系统级提示体验。",
-            color = c.subText,
-            fontSize = 14.sp
-        )
+    LaunchedEffect(refreshing) {
+        val fallback = RemoteDialogRepository.cached(context)
+        try {
+            config = RemoteDialogRepository.fetchAndCache(context)
+            syncStatus = "云端同步成功"
+        } catch (error: Exception) {
+            config = fallback ?: RemoteDialogRepository.bundled(context)
+            val reason = error.message?.take(55) ?: "未知错误"
+            syncStatus = if (fallback != null) "使用本地缓存 · $reason" else "使用内置配置 · $reason"
+        }
+        if (!initialized) {
+            initialized = true
+            showDialog = config.enabled && config.showOnLaunch &&
+                !(config.rememberAcceptance && prefs.getBoolean(PREF_HIDE, false))
+        } else if (!config.enabled) {
+            showDialog = false
+        }
+    }
 
+    MiuixTheme(colors = if (dark) darkColorScheme() else lightColorScheme()) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(30.dp))
-                .background(c.surface)
-                .border(1.dp, c.line, RoundedCornerShape(30.dp))
-                .padding(22.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .fillMaxSize()
+                .background(c.background)
+                .safeDrawingPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Box(
+            Spacer(Modifier.height(18.dp))
+            Text(
+                text = "MIUIX  /  COMPONENT LAB",
+                color = accent,
+                fontSize = 11.sp,
+                letterSpacing = 1.6.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "声明弹窗",
+                color = c.mainText,
+                fontWeight = FontWeight.Bold,
+                fontSize = 36.sp,
+                letterSpacing = (-1).sp
+            )
+            Text(
+                text = "远程配置 · 精致动效 · 无 XML 布局",
+                color = c.subText,
+                fontSize = 14.sp
+            )
+
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(178.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(
-                        Brush.linearGradient(
-                            if (dark) listOf(Color(0xFF252D47), Color(0xFF171E31))
-                            else listOf(Color(0xFFEDF2FF), Color(0xFFE4EAF9))
-                        )
-                    ),
-                contentAlignment = Alignment.Center
+                    .clip(RoundedCornerShape(30.dp))
+                    .background(c.surface)
+                    .border(1.dp, c.line, RoundedCornerShape(30.dp))
+                    .padding(22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box(
                     modifier = Modifier
-                        .size(112.dp)
-                        .background(Blue.copy(alpha = if (dark) 0.16f else 0.10f), CircleShape),
+                        .fillMaxWidth()
+                        .height(178.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(
+                            Brush.linearGradient(
+                                if (dark) listOf(Color(0xFF2A2C30), Color(0xFF181A1D))
+                                else listOf(Color(0xFFF2F2F3), Color(0xFFE4E6E9))
+                            )
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
-                    WhaleLogo(Modifier.size(79.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(112.dp)
+                            .background(accent.copy(alpha = if (dark) 0.22f else 0.09f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        WhaleLogo(Modifier.size(79.dp), accent)
+                    }
+                    Text(
+                        "DIALOG / REMOTE",
+                        color = c.subText,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 1.5.sp,
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
+                    )
                 }
-                Text(
-                    "DIALOG / 001",
-                    color = if (dark) Color(0xFFC4CEFA) else Color(0xFF7183B6),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
-                )
+                Spacer(Modifier.height(22.dp))
+                Text(config.header.title, color = c.mainText, fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text(syncStatus, color = c.subText, fontSize = 12.sp)
+                Spacer(Modifier.height(22.dp))
+                Button(
+                    onClick = {
+                        if (config.enabled) showDialog = true
+                        else Toast.makeText(context, "远程配置已关闭弹窗", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    cornerRadius = 18.dp,
+                    colors = ButtonDefaults.buttonColors(color = accent, contentColor = Color.White)
+                ) {
+                    Text("预览弹窗", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
-            Spacer(Modifier.height(22.dp))
-            Text(
-                "软件使用声明",
-                color = c.mainText,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "圆角容器 · 原生按压反馈 · 弹性动效",
-                color = c.subText,
-                fontSize = 12.sp
-            )
-            Spacer(Modifier.height(22.dp))
-            Button(
-                onClick = { showDialog = true },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                cornerRadius = 18.dp,
-                colors = ButtonDefaults.buttonColorsPrimary()
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(23.dp))
+                    .background(c.surface)
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text("预览弹窗", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("云端配置", color = c.mainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text(if (config.enabled) "已启用" else "已关闭", color = c.subText, fontSize = 12.sp)
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("用户偏好", color = c.subText, fontSize = 13.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text(if (neverShow) "不再自动显示" else "允许自动显示",
+                        color = if (neverShow) accent else c.mainText, fontSize = 12.sp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("上次操作", color = c.subText, fontSize = 13.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text(lastAction, color = c.mainText, fontSize = 13.sp)
+                }
+                Button(
+                    onClick = { refreshing += 1 },
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    cornerRadius = 15.dp
+                ) { Text("重新同步云端", fontSize = 13.sp) }
+                Button(
+                    onClick = {
+                        prefs.edit().remove(PREF_HIDE).apply()
+                        neverShow = false
+                        lastAction = "已重置"
+                        Toast.makeText(context, "已清除不再显示记录", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    cornerRadius = 15.dp
+                ) { Text("重置弹窗记录", fontSize = 13.sp) }
             }
+            Spacer(Modifier.height(14.dp))
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(23.dp))
-                .background(c.surface)
-                .padding(horizontal = 20.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("偏好记录", color = c.mainText, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                Spacer(Modifier.weight(1f))
-                Text(
-                    if (neverShow) "不再自动显示" else "允许自动显示",
-                    color = if (neverShow) Blue else c.subText,
-                    fontSize = 12.sp
-                )
+        StatementDialog(
+            show = showDialog && config.enabled,
+            config = config,
+            dark = dark,
+            onDismiss = { showDialog = false },
+            onLearn = {
+                lastAction = "交流学习"
+                when (config.buttons.learn.action) {
+                    "dismiss" -> showDialog = false
+                    "open_url" -> {
+                        val url = config.buttons.learn.url
+                        if (RemoteDialogRepository.isSafeWebUrl(url)) {
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "无法打开链接", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(context, "尚未配置有效链接", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    else -> Toast.makeText(context, "不支持的按钮操作", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onReject = {
+                lastAction = "不同意"
+                showDialog = false
+            },
+            onAccept = {
+                val remember = config.rememberAcceptance &&
+                    config.buttons.accept.action == "accept_and_remember"
+                if (remember) {
+                    prefs.edit().putBoolean(PREF_HIDE, true).apply()
+                    neverShow = true
+                }
+                lastAction = if (remember) "同意并不再显示" else "同意"
+                showDialog = false
             }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("上次操作", color = c.subText, fontSize = 13.sp)
-                Spacer(Modifier.weight(1f))
-                Text(lastAction, color = c.mainText, fontSize = 13.sp)
-            }
-            Button(
-                onClick = {
-                    prefs.edit().remove(PREF_HIDE).apply()
-                    neverShow = false
-                    lastAction = "已重置"
-                    Toast.makeText(context, "已清除不再显示记录", Toast.LENGTH_SHORT).show()
-                },
-                modifier = Modifier.fillMaxWidth().height(46.dp),
-                cornerRadius = 15.dp
-            ) {
-                Text("重置弹窗记录", fontSize = 13.sp)
-            }
-        }
-        Spacer(Modifier.height(14.dp))
+        )
     }
-
-    StatementDialog(
-        show = showDialog,
-        dark = dark,
-        onDismiss = { showDialog = false },
-        onLearn = {
-            Toast.makeText(context, "交流学习链接尚未设置", Toast.LENGTH_SHORT).show()
-            lastAction = "交流学习"
-        },
-        onReject = {
-            lastAction = "不同意"
-            showDialog = false
-        },
-        onAccept = {
-            prefs.edit().putBoolean(PREF_HIDE, true).apply()
-            neverShow = true
-            lastAction = "同意并不再显示"
-            showDialog = false
-        }
-    )
 }
 
 @Composable
 private fun StatementDialog(
     show: Boolean,
+    config: RemoteDialogConfig,
     dark: Boolean,
     onDismiss: () -> Unit,
     onLearn: () -> Unit,
@@ -288,132 +328,119 @@ private fun StatementDialog(
     LaunchedEffect(show) { visible.targetState = show }
     if (show || visible.currentState || !visible.isIdle) {
         val c = palette(dark)
+        val accent = config.appearance.accent()
+        val corner = config.appearance.cornerRadiusDp.dp
         val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.86f).dp
+        val enter = if (!config.appearance.animationEnabled || config.appearance.animation == "none") EnterTransition.None
+            else if (config.appearance.animation == "spring_scale") {
+                fadeIn(tween(220)) + scaleIn(initialScale = 0.88f,
+                    animationSpec = spring(dampingRatio = 0.77f,
+                        stiffness = Spring.StiffnessMediumLow))
+            } else fadeIn(tween(220))
+        val exit = if (!config.appearance.animationEnabled || config.appearance.animation == "none") ExitTransition.None
+            else if (config.appearance.animation == "spring_scale") {
+                fadeOut(tween(145)) + scaleOut(targetScale = 0.94f, animationSpec = tween(145))
+            } else fadeOut(tween(145))
+
         Dialog(
             onDismissRequest = onDismiss,
             properties = DialogProperties(
-                dismissOnClickOutside = true,
-                dismissOnBackPress = true,
+                dismissOnClickOutside = config.dismissOnOutside,
+                dismissOnBackPress = config.dismissOnBack,
                 usePlatformDefaultWidth = false
             )
         ) {
-            AnimatedVisibility(
-                visibleState = visible,
-                enter = fadeIn(tween(220)) + scaleIn(
-                    initialScale = 0.88f,
-                    animationSpec = spring(
-                        dampingRatio = 0.77f,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                ),
-                exit = fadeOut(tween(145)) + scaleOut(
-                    targetScale = 0.94f,
-                    animationSpec = tween(145)
-                )
-            ) {
+            AnimatedVisibility(visibleState = visible, enter = enter, exit = exit) {
                 Column(
                     modifier = Modifier
                         .padding(horizontal = 20.dp)
                         .widthIn(max = 420.dp)
                         .fillMaxWidth()
                         .heightIn(max = maxHeight)
-                        .shadow(24.dp, RoundedCornerShape(34.dp))
-                        .clip(RoundedCornerShape(34.dp))
+                        .shadow(24.dp, RoundedCornerShape(corner))
+                        .clip(RoundedCornerShape(corner))
                         .background(c.surface)
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 24.dp, vertical = 26.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(94.dp)
-                            .clip(RoundedCornerShape(29.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    if (dark) listOf(Color(0xFF2B3550), Color(0xFF1C263E))
-                                    else listOf(Color(0xFFF1F5FF), Color(0xFFE7EEFF))
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        WhaleLogo(Modifier.size(68.dp))
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "作者：神秘人",
-                        color = c.subText,
-                        fontSize = 12.sp,
-                        letterSpacing = 0.4.sp
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "软件使用声明",
-                        color = c.mainText,
-                        fontSize = 23.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(7.dp))
-                    Text(
-                        "请在继续使用前阅读以下说明",
-                        color = c.subText,
-                        fontSize = 12.5.sp
-                    )
-                    Spacer(Modifier.height(22.dp))
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(c.mutedSurface)
-                            .padding(horizontal = 18.dp, vertical = 18.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier.size(7.dp).background(BlueBright, CircleShape)
-                            )
-                            Spacer(Modifier.width(9.dp))
-                            Text(
-                                "重要说明",
-                                fontSize = 12.sp,
-                                color = c.mainText,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                    if (config.header.showIcon && config.header.icon == "whale") {
+                        Box(
+                            modifier = Modifier
+                                .size(94.dp)
+                                .clip(RoundedCornerShape(29.dp))
+                                .background(accent.copy(alpha = if (dark) 0.22f else 0.08f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            WhaleLogo(Modifier.size(68.dp), accent)
                         }
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            text = "郑重声明：本软件来源于网络，非本人开发。依据《计算机软件保护条例》相关规定，此软件仅用于学习和研究软件的设计思想与原理，绝不可用于任何商业或非法目的。",
-                            color = c.mainText.copy(alpha = if (dark) 0.84f else 0.79f),
-                            fontSize = 13.5.sp,
-                            lineHeight = 24.sp
-                        )
+                        Spacer(Modifier.height(16.dp))
+                    }
+                    if (config.header.author.isNotBlank()) {
+                        Text(config.header.author, color = c.subText, fontSize = 12.sp,
+                            letterSpacing = 0.4.sp)
+                        Spacer(Modifier.height(6.dp))
+                    }
+                    Text(config.header.title, color = c.mainText, fontSize = 23.sp,
+                        fontWeight = FontWeight.Bold)
+                    if (config.header.subtitle.isNotBlank()) {
+                        Spacer(Modifier.height(7.dp))
+                        Text(config.header.subtitle, color = c.subText, fontSize = 12.5.sp)
+                    }
+                    if (config.content.showNotice) {
+                        Spacer(Modifier.height(22.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(c.mutedSurface)
+                                .padding(horizontal = 18.dp, vertical = 18.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(7.dp).background(accent, CircleShape))
+                                Spacer(Modifier.width(9.dp))
+                                Text(config.content.noticeTitle, fontSize = 12.sp,
+                                    color = c.mainText, fontWeight = FontWeight.SemiBold)
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Text(config.content.text,
+                                color = c.mainText.copy(alpha = if (dark) 0.84f else 0.79f),
+                                fontSize = 13.5.sp, lineHeight = 24.sp)
+                        }
                     }
                     Spacer(Modifier.height(20.dp))
-                    Button(
-                        onClick = onLearn,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        cornerRadius = 16.dp
-                    ) {
-                        Text("交流学习", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    if (config.buttons.learn.enabled) {
+                        Button(onClick = onLearn,
+                            modifier = Modifier.fillMaxWidth().height(48.dp), cornerRadius = 16.dp) {
+                            Text(config.buttons.learn.text, fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium)
+                        }
+                        Spacer(Modifier.height(10.dp))
                     }
-                    Spacer(Modifier.height(10.dp))
-                    Button(
-                        onClick = onReject,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        cornerRadius = 16.dp,
-                        colors = ButtonDefaults.buttonColors(
-                            color = c.surface,
-                            contentColor = c.subText
-                        )
-                    ) {
-                        Text("不同意", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    if (config.buttons.reject.enabled) {
+                        Button(
+                            onClick = onReject,
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            cornerRadius = 16.dp,
+                            colors = ButtonDefaults.buttonColors(color = c.surface,
+                                contentColor = c.subText)
+                        ) {
+                            Text(config.buttons.reject.text, fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium)
+                        }
+                        Spacer(Modifier.height(10.dp))
                     }
-                    Spacer(Modifier.height(10.dp))
-                    Button(
-                        onClick = onAccept,
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        cornerRadius = 17.dp,
-                        colors = ButtonDefaults.buttonColorsPrimary()
-                    ) {
-                        Text("同意并不再显示", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    if (config.buttons.accept.enabled) {
+                        Button(
+                            onClick = onAccept,
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            cornerRadius = 17.dp,
+                            colors = ButtonDefaults.buttonColors(color = accent,
+                                contentColor = Color.White)
+                        ) {
+                            Text(config.buttons.accept.text, fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
@@ -422,7 +449,7 @@ private fun StatementDialog(
 }
 
 @Composable
-private fun WhaleLogo(modifier: Modifier = Modifier) {
+private fun WhaleLogo(modifier: Modifier = Modifier, accent: Color) {
     Canvas(modifier = modifier) {
         val unit = size.minDimension / 100f
         val whale = Path().apply {
@@ -441,7 +468,7 @@ private fun WhaleLogo(modifier: Modifier = Modifier) {
         drawPath(
             path = whale,
             brush = Brush.linearGradient(
-                listOf(Color(0xFF7296FF), Color(0xFF345DD5)),
+                listOf(accent.copy(alpha = 0.64f), accent),
                 start = Offset(0f, 0f),
                 end = Offset(size.width, size.height)
             )
@@ -461,7 +488,7 @@ private fun WhaleLogo(modifier: Modifier = Modifier) {
             center = Offset(70f * unit, 43f * unit)
         )
         drawCircle(
-            color = Color(0xFF345DD5),
+            color = accent,
             radius = 1f * unit,
             center = Offset(70.6f * unit, 42.8f * unit)
         )

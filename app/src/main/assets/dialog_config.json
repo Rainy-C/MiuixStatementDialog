@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "dialog": {
+    "enabled": true,
+    "showOnLaunch": true,
+    "rememberAcceptance": true,
+    "dismissOnBack": true,
+    "dismissOnOutside": false,
+    "header": {
+      "showIcon": true,
+      "icon": "whale",
+      "author": "神秘人",
+      "title": "软件使用声明",
+      "subtitle": "请在继续使用前阅读以下说明"
+    },
+    "content": {
+      "showNotice": true,
+      "noticeTitle": "重要说明",
+      "text": "郑重声明：本软件来源于网络，非本人开发。依据《计算机软件保护条例》相关规定，此软件仅用于学习和研究软件的设计思想与原理，绝不可用于任何商业或非法目的。"
+    },
+    "buttons": {
+      "learn": {"enabled": true, "text": "交流学习", "action": "open_url", "url": null},
+      "reject": {"enabled": true, "text": "不同意", "action": "dismiss"},
+      "accept": {"enabled": true, "text": "同意并不再显示", "action": "accept_and_remember"}
+    },
+    "appearance": {
+      "theme": "system",
+      "cornerRadiusDp": 34,
+      "accentColor": "#292929",
+      "animation": "spring_scale",
+      "animationEnabled": true
+    }
+  }
+}

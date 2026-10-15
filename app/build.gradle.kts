@@ -43,4 +43,6 @@ dependencies {
     implementation("androidx.compose.ui:ui:1.10.3")
     implementation("androidx.compose.foundation:foundation:1.10.3")
     implementation("top.yukonga.miuix.kmp:miuix-android:0.8.8")
+    implementation("org.jsoup:jsoup:1.23.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 }

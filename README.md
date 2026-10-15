@@ -1,28 +1,23 @@
-# Miuix Statement Dialog
+# Miuix Statement Dialog · Remote Config
 
-纯 Kotlin + Jetpack Compose + Miuix 的声明弹窗演示项目。
+纯 Kotlin + Compose + Miuix 弹窗 Demo。无 XML 布局（AndroidManifest.xml 是 Android 必需的声明文件）。
 
-## 功能
+## 远程配置
 
-- 参考图片的完整作者信息、使用声明、三个操作按钮
-- 弹性入场与退出动画
-- Miuix Theme / Button / Text 等真实控件
-- 自动明暗主题、沉浸式系统栏
-- 不再显示选项写入 SharedPreferences；主页可随时重新预览或重置
-- 图形全部在 Compose Canvas 绘制，无 XML 布局、无图片素材文件
+- QQ 收藏分享链接固定为 `https://sharechain.qq.com/df1d47499a5944a23f9631b5145daefb?qq_aio_chat_type=2`。
+- `RemoteDialogConfig.kt` 使用 Jsoup 下载 HTML、提取 `.note-content`，还原 HTML 实体，再用 `org.json` 解析。
+- 读取 `version: 1` 和 `dialog` 下各项配置；支持开关、标题、作者、正文、按钮、链接、圆角、颜色、系统/亮/暗主题和动画。
+- 启动时从云端刷新；失败时优先使用最后一次有效缓存，再退回 `app/src/main/assets/dialog_config.json`。
+- 首页可查看同步状态、手动重新同步、重置“不再显示”。用户同意选择存储在 SharedPreferences；远程配置不会执行任意脚本。
+- 远程 JSON 中 `buttons.learn.url` 只允许 http/https。若空则提示尚未配置；按钮 `enabled=false` 会隐藏。
+- `version` 是 JSON 格式版本，不会因为正文修改而强制对已同意的用户再次显示。
 
-## GitHub Actions 编译
+## GitHub Actions
 
-将压缩包内容直接放入 GitHub 仓库根目录（包括 `.github` 隐藏目录），推送到 `main` 或 `master`，或到 `Actions` 页面手动运行 `Build Android APK`。
+1. 将项目全部文件放入 GitHub 仓库根目录。
+2. 推送到 `main`；工作流自动运行 `gradle :app:assembleDebug`。
+3. 在 Actions → Artifacts 下载 `MiuixStatementDialog-Debug`。
 
-工作流使用 JDK 17、Gradle 8.13、Android SDK 36，运行 `:app:assembleDebug`。在工作流完成后，进入 `Artifacts` 下载 `MiuixStatementDialog-Debug`，解压可获得可安装的 `app-debug.apk`。
+工作流使用 JDK 17、Android API 36、Gradle 8.13，并且已将 Kotlin JVM target 改为 compilerOptions DSL。
 
-这个 Demo 不包含 Gradle Wrapper，GitHub Actions 会由 `setup-gradle` 安装指定版本的 Gradle。
-
-## 技术说明
-
-- `miuix-android:0.8.8`（v0.8.x 的旧坐标。不要直接换成 v0.9.x，后者已拆分模块）
-- `minSdk=26`, `compileSdk=36`, `targetSdk=35`
-- XML 仅保留 Android 平台必需的 `AndroidManifest.xml`，不使用任何布局或 Drawable XML
-- “交流学习”目前演示 Toast，因为没有提供实际交流群链接
-- **只进行了源码静态审查，未运行编译或设备测试**
+这份源码只进行了静态审查，没有在本地编译或运行。QQ 链接能否被 Android 端直接抓取，以实际网络/腾讯服务端访问策略为准。
